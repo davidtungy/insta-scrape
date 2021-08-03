@@ -22,12 +22,12 @@ def main(args):
 	print("My boy has", followers, "followers and is following", following)
 	print("Follow ratio of ", followers/following)
 
-	scroll_to_bottom(browser)
-	element = browser.find_element_by_xpath("//body").get_attribute('outerHTML')
-	soup = BeautifulSoup(element, 'html.parser')
-	posts = soup.select('div.v1Nh3.kIKUG._bz0w')
-	print("Found ", len(posts), " posts to scrutinize")
+	urls = getPostUrls(browser, max_posts=500)
+	print("---")
+	print(len(urls), " posts to scrutinize...")
+	print(urls)
 
+	time.sleep(2000)
 	browser.quit()
 
 def authenticate(browser, username, password):
@@ -61,19 +61,34 @@ def getFollowCounts(browser, user):
 	return followers, following
 	
 # Scroll to bottom of the browser to pick up dynamically-loaded content
-# Added a max scroll count (if someone has a crazy amount of posts)
-def scroll_to_bottom(browser):
+# A maximum of 32 posts or so can be displayed at a time
+# Added a max post count (if someone has a crazy amount of posts)
+# Returns individual post urls in chronological order (oldest first)
+def getPostUrls(browser, max_posts=100, timeout=4):
+	urls = []
 	prev = browser.execute_script("return document.body.scrollHeight")
-	max_count = 5
-	curr_count = 0
 	while True:
 		browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-		time.sleep(2)
+		time.sleep(timeout)
 		curr = browser.execute_script("return document.body.scrollHeight")
-		curr_count += 1
-		if curr == prev or curr_count >= max_count:
-			break
+		element = browser.find_element_by_xpath("//body").get_attribute('outerHTML')
+		soup = BeautifulSoup(element, 'html.parser')
+		posts = soup.select('div.v1Nh3.kIKUG._bz0w')
+		for p in posts:
+			link = p.find('a')['href']
+			if link not in urls:
+				urls.append(link)
+				print("appending: ", link)
+			if len(urls) == max_posts:
+				return urls
+		if curr == prev:
+			time.sleep(timeout+2)
+			if curr == prev:
+				break
+			timeout += 2
 		prev = curr
+	urls.reverse()
+	return urls
 
 
 '''
