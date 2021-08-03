@@ -22,6 +22,11 @@ def main(args):
 	print("My boy has", followers, "followers and is following", following)
 	print("Follow ratio of ", followers/following)
 
+	scroll_to_bottom(browser)
+	element = browser.find_element_by_xpath("//body").get_attribute('outerHTML')
+	soup = BeautifulSoup(element, 'html.parser')
+	posts = soup.select('div.v1Nh3.kIKUG._bz0w')
+	print("Found ", len(posts), " posts to scrutinize")
 
 	browser.quit()
 
@@ -55,6 +60,21 @@ def getFollowCounts(browser, user):
 	following = int(following.replace(',', '').strip())
 	return followers, following
 	
+# Scroll to bottom of the browser to pick up dynamically-loaded content
+# Added a max scroll count (if someone has a crazy amount of posts)
+def scroll_to_bottom(browser):
+	prev = browser.execute_script("return document.body.scrollHeight")
+	max_count = 5
+	curr_count = 0
+	while True:
+		browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+		time.sleep(2)
+		curr = browser.execute_script("return document.body.scrollHeight")
+		curr_count += 1
+		if curr == prev or curr_count >= max_count:
+			break
+		prev = curr
+
 
 '''
 Pretty much need to supply user and password (Instagram doesn't allow non-authenticated viewing boo)
