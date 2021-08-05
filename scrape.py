@@ -45,8 +45,8 @@ def main(args):
 	time.sleep(1)
 	soup = BeautifulSoup(browser.page_source, 'lxml')
 
-	#authenticate(browser, args.user, args.password, use_cache=True)
-	authenticate(browser, args.user, args.password, use_cache=False)
+	authenticate(browser, args.user, args.password, use_cache=True)
+	#authenticate(browser, args.user, args.password, use_cache=False)
 
 	# If log-in failed, this code will execute as well
 	if isNotValidUsername(browser, args.username):
@@ -65,64 +65,12 @@ def main(args):
 		browser.quit()
 		return
 
-	#urls = getPostUrls(browser, max_posts=500, use_cache=True)
-	urls = getPostUrls(browser, max_posts=500, use_cache=False)
+	urls = getPostUrls(browser, max_posts=500, use_cache=True)
+	#urls = getPostUrls(browser, max_posts=500, use_cache=False)
 	print("---")
 	print(len(urls), " posts to scrutinize...")
 
-	cleaned_posts = []
-
-	for url in urls:
-		post_url = 'https://www.instagram.com{}?hl=en'.format(url)
-		browser.get(post_url)
-		soup = BeautifulSoup(browser.page_source, 'html.parser')
-
-		# Possibly need to refactor this into a class (or maybe dataframe?)
-		caption = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/span').get_attribute('innerHTML')
-		if soup.find('video') is None:
-			post_type = 'image'
-			views = None
-										
-			if isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/span/a'):
-				# Liked by X and <> others
-				likes = 1
-				if isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/a/span'):
-					likes += int(browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/a/span').get_attribute('innerHTML'))
-			elif isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div/a'):
-				# 1 like
-				likes = 1
-			else:
-				# Liked by <> others
-				likes = int(browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div/a/span').get_attribute('innerHTML'))
-			date = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/div/div/time').get_attribute('title')
-		else:
-			post_type = 'video'
-			if isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/span/span'):
-				views_element = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/span/span')
-				views = int(views_element.get_attribute('innerHTML'))
-				views_element.click()
-				likes = int(browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div/div[4]/span').get_attribute('innerHTML'))
-				date = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[2]/a/time').get_attribute('title')
-			else:
-				# Some videos are inconsistent and do not display views (appear as images)
-				views = None
-				caption = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/span').get_attribute('innerHTML')
-
-				if isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/span/a'):
-					likes = 1
-					if isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/a/span'):
-						likes += int(browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/a/span').get_attribute('innerHTML'))
-				else:
-					likes = int(browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div/a/span').get_attribute('innerHTML'))
-				date = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/div/div/time').get_attribute('title')
-		
-		cleaned = {"post_type": post_type, "caption": caption, "likes": likes, "views": views, "date": date}
-		print('----------')
-		print(cleaned)
-		cleaned_posts.append(cleaned)
-
-		# Be generous to their servers and sleep a short while
-		time.sleep(randint(0,3))
+	cleaned_posts = cleanPosts(browser, urls)
 
 	browser.quit()
 
@@ -229,6 +177,7 @@ def getPostUrls(browser, max_posts=100, timeout=2, use_cache=False):
 	urls = []
 	prev = browser.execute_script("return document.body.scrollHeight")
 	while True:
+		print("Scrolling")
 		browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
 		time.sleep(timeout)
 		curr = browser.execute_script("return document.body.scrollHeight")
@@ -242,7 +191,9 @@ def getPostUrls(browser, max_posts=100, timeout=2, use_cache=False):
 			if len(urls) == max_posts:
 				return urls
 		if curr == prev:
-			time.sleep(timeout+2)
+			print("Retry")
+			time.sleep(timeout + 2)
+			curr = browser.execute_script("return document.body.scrollHeight")
 			if curr == prev:
 				break
 			timeout += 2
@@ -265,9 +216,15 @@ def cleanPosts(browser, urls):
 	cleaned_posts = []
 
 	for url in urls:
-		post_url = 'https://www.instagram.com{}?hl=en'.format(url)
+		post_url = 'https://www.instagram.com{}'.format(url)
 		browser.get(post_url)
 		soup = BeautifulSoup(browser.page_source, 'html.parser')
+
+		# Wait until page render
+		# Sometimes may have to trigger a refresh (may be an Instagram rendering issue)
+		while not isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/span'):
+			time.sleep(1)
+			soup = BeautifulSoup(browser.page_source, 'html.parser')
 
 		caption = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/span').get_attribute('innerHTML')
 		
@@ -311,7 +268,8 @@ def cleanPosts(browser, urls):
 		
 		cleaned = {"post_type": post_type, "caption": caption, "likes": likes, "views": views, "date": date}
 		cleaned_posts.append(cleaned)
-
+		print("---")
+		print(cleaned)
 		# Be forgiving to their servers and sleep a short while
 		time.sleep(randint(0,3))
 
