@@ -6,17 +6,32 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
+import pickle
+from os import path
+import os
+
+COOKIE_PATH = 'cookie.pkl'
 
 def main(args):
 	options = webdriver.ChromeOptions()
 	options.add_argument('--ignore-certificate-errors')
-	options.add_argument('--incognito')
+	#options.add_argument('--incognito')
 	#options.add_argument('--headless')
 	browser = webdriver.Chrome(ChromeDriverManager().install(), options=options)
 	time.sleep(1)
 	soup = BeautifulSoup(browser.page_source, 'lxml')
 
-	authenticate(browser, args.user, args.password)
+	# Use cookie if available (don't want to get timeout banned)
+	if path.exists(COOKIE_PATH):
+		# Must navigate to same domain
+		page_url = 'https://www.instagram.com/accounts/login/?hl=en'
+		browser.get(page_url)
+		with open(COOKIE_PATH, 'rb') as cookiesfile:
+			cookies = pickle.load(cookiesfile)
+			for cookie in cookies:
+				browser.add_cookie(cookie)
+	elif args.user is not None and args.password is not None:
+		authenticate(browser, args.user, args.password)
 
 	followers, following = getFollowCounts(browser, args.username)
 	print("My boy has", followers, "followers and is following", following)
@@ -41,11 +56,18 @@ def authenticate(browser, username, password):
 	time.sleep(5)
 	browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div/div/div/button').click()
 	time.sleep(5)
+	# Looks like HTML changes dynamically (possibly day by day to prevent bots)
 	if isXPATHPresent(browser, '/html/body/div[4]/div/div/div/div[3]/button[2]'):
 		browser.find_element(By.XPATH, '/html/body/div[4]/div/div/div/div[3]/button[2]').click()
-	else:
+	elif isXPATHPresent(browser, '/html/body/div[5]/div/div/div/div[3]/button[2]'):
 		browser.find_element(By.XPATH, '/html/body/div[5]/div/div/div/div[3]/button[2]').click()
+	else:
+		browser.find_element(By.XPATH, '/html/body/div[6]/div/div/div/div[3]/button[2]').click()
 	time.sleep(1)
+	# save cookie
+	print("Cookies:", browser.get_cookies())
+	with open(os.path.join(os.path.dirname(__file__), COOKIE_PATH), 'wb') as filehandler:
+		pickle.dump(browser.get_cookies(), filehandler)
 
 def isXPATHPresent(browser, xpath):
 	return len(browser.find_elements(By.XPATH, xpath)) > 0
@@ -78,7 +100,6 @@ def getPostUrls(browser, max_posts=100, timeout=4):
 			link = p.find('a')['href']
 			if link not in urls:
 				urls.append(link)
-				print("appending: ", link)
 			if len(urls) == max_posts:
 				return urls
 		if curr == prev:
