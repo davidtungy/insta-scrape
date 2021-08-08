@@ -18,11 +18,6 @@ from selenium.webdriver.common.by import By
 from selenium.common.exceptions import ElementClickInterceptedException
 from webdriver_manager.chrome import ChromeDriverManager
 
-import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-
 DIR_PATH = ''
 
 # TO DO:
@@ -88,19 +83,6 @@ def main(args):
 	# Save to dataframe for analysis
 	df = pd.DataFrame(cleaned_posts)
 	df.to_csv(CSV_CACHE, encoding='utf-8', index=True)
-
-	'''
-	print("Creating graph...")
-	likes = []
-	for post in cleaned_posts:
-		likes.append(post["likes"])
-	x = np.arange(len(cleaned_posts))
-	plt.plot(x, likes, label="Likes")
-	plt.title("@" + args.username)
-	plt.xlabel("Post")
-	plt.ylabel("Likes")
-	plt.savefig(args.username + ".png")
-	'''
 
 	print("Completed.")
 
