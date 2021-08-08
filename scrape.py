@@ -1,7 +1,12 @@
 import argparse
+import contextlib
 import os
 import pickle
+import sys
 import time
+
+from scrape_utils import *
+from scrape_paths import *
 
 from os import path
 from random import randint
@@ -18,8 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-COOKIE_PATH = 'cookie.pkl'
-POST_CACHE = 'posts.txt'
+DIR_PATH = ''
 
 # TO DO:
 # (1) Refactor a bunch of these constants/repetitive code into functions
@@ -30,54 +34,62 @@ POST_CACHE = 'posts.txt'
 # (3) If username or password is not set (different than incorrect), continue
 #     execution instead of early stopping (IG sets a redirect when attempting
 #     to switch browsers)
-# (4) Create main.py, which should be the driver that calls insta_scrape.py 
+# (4) Create main.py, which should be the driver that calls scrape.py 
 #     (this) and analysis.py for DataFrame textual analysis
 # (5) If needed, can add additional scraped material (probably not pictures
 #     due to privacy) to cleaned_posts, e.g. IG tagging the post as a 
 #     screenshot of Twitter, photo text that is pre-provided
 
 def main(args):
+	# Create directory to write to
+	os.makedirs(args.username, exist_ok=True)
+	DIR_PATH = args.username
+	POST_CACHE = os.path.join(DIR_PATH, 'posts.txt')
+	CSV_CACHE = os.path.join(DIR_PATH, 'data.csv')
+
 	options = webdriver.ChromeOptions()
 	options.add_argument('--ignore-certificate-errors')
 	#options.add_argument('--incognito')
 	#options.add_argument('--headless')
 	browser = webdriver.Chrome(ChromeDriverManager().install(), options=options)
-	time.sleep(1)
-	soup = BeautifulSoup(browser.page_source, 'lxml')
 
 	authenticate(browser, args.user, args.password, use_cache=True)
 	#authenticate(browser, args.user, args.password, use_cache=False)
 
 	# If log-in failed, this code will execute as well
-	if isNotValidUsername(browser, args.username):
+	if not is_valid_username(browser, args.username):
 		print("User", args.username, "could not be accessed.")
 		browser.quit()
 		return
 
-	followers, following = getFollowCounts(browser, args.username)
+	followers, following = get_follow_counts(browser, args.username)
 
 	print("My boy has", followers, "followers and is following", following)
 	print("Follow ratio of ", followers/following)
 
-
-	if isPrivate(browser, args.username):
+	if is_private(browser, args.username):
 		print("Instagram is private. Must log-in and be a follower to see posts.")
 		browser.quit()
 		return
 
-	urls = getPostUrls(browser, max_posts=500, use_cache=True)
+	urls = get_post_urls(browser, max_posts=500, use_cache=True, cache_location=POST_CACHE)
 	#urls = getPostUrls(browser, max_posts=500, use_cache=False)
+	with open(POST_CACHE, "w") as f:
+		f.seek(0)
+		f.truncate()
+		f.write("\n".join(urls))
 	print("---")
 	print(len(urls), " posts to scrutinize...")
 
-	cleaned_posts = cleanPosts(browser, urls)
+	cleaned_posts = clean_posts(browser, urls)
 
 	browser.quit()
 
 	# Save to dataframe for analysis
 	df = pd.DataFrame(cleaned_posts)
-	df.to_csv(args.username + ".csv", encoding='utf-8', index=True)
+	df.to_csv(CSV_CACHE, encoding='utf-8', index=True)
 
+	'''
 	print("Creating graph...")
 	likes = []
 	for post in cleaned_posts:
@@ -88,14 +100,12 @@ def main(args):
 	plt.xlabel("Post")
 	plt.ylabel("Likes")
 	plt.savefig(args.username + ".png")
+	'''
 
 	print("Completed.")
 
-
 def authenticate(browser, username, password, use_cache=False, save_cookie=True):
-	page_url = 'https://www.instagram.com/accounts/login/?hl=en'
-	browser.get(page_url)
-	
+	browser.get(LOGIN_URL)
 	if use_cache and path.exists(COOKIE_PATH):
 		# Set browser cookie information to log-in
 		print("Authenticating via cookie set in: ", COOKIE_PATH, "...")
@@ -108,28 +118,28 @@ def authenticate(browser, username, password, use_cache=False, save_cookie=True)
 		# Log in with given user information
 		print("Logging in with given username and password...")
 		time.sleep(1)
-		browser.find_element(By.XPATH, '//*[@id="loginForm"]/div/div[1]/div/label/input').send_keys(username)
-		browser.find_element(By.XPATH, '//*[@id="loginForm"]/div/div[2]/div/label/input').send_keys(password)
+		browser.find_element_by_xpath(LOGIN_FIELD_USERNAME).send_keys(username)
+		browser.find_element_by_xpath(LOGIN_FIELD_PASSWORD).send_keys(password)
 		time.sleep(1)
 		try:
-			browser.find_element(By.XPATH, '//*[@id="loginForm"]/div/div[3]/button').click()
+			browser.find_element_by_xpath(LOGIN_FIELD_SUBMIT).click()
 		except ElementClickInterceptedException:
 			print("Could not log-in. Username and/or password may have been entered incorrectly, scraping may not be able to work as intended.")
 			return
 
 		time.sleep(5)
-		if isXPATHPresent(browser, '//*[@id="slfErrorAlert"]'):
+		if is_xpath_present(browser, LOGIN_INCORRECT):
 			print("Username and/or password entered incorrectly, scraping may not be able to work as intended.")
 			return
-		browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div/div/div/button').click()
+		browser.find_element_by_xpath(LOGIN_LOGIN_SAVE).click()
 		time.sleep(5)
 		# Looks like HTML changes dynamically (possibly day by day to prevent bots)
-		if isXPATHPresent(browser, '/html/body/div[4]/div/div/div/div[3]/button[2]'):
-			browser.find_element(By.XPATH, '/html/body/div[4]/div/div/div/div[3]/button[2]').click()
-		elif isXPATHPresent(browser, '/html/body/div[5]/div/div/div/div[3]/button[2]'):
-			browser.find_element(By.XPATH, '/html/body/div[5]/div/div/div/div[3]/button[2]').click()
+		if is_xpath_present(browser, LOGIN_NOTIFICATIONS_1):
+			browser.find_element_by_xpath(LOGIN_NOTIFICATIONS_1).click()
+		elif is_xpath_present(browser, LOGIN_NOTIFICATIONS_2):
+			browser.find_element_by_xpath(LOGIN_NOTIFICATIONS_2).click()
 		else:
-			browser.find_element(By.XPATH, '/html/body/div[6]/div/div/div/div[3]/button[2]').click()
+			browser.find_element_by_xpath(LOGIN_NOTIFICATIONS_3).click()
 		time.sleep(1)
 		# Save cookie
 		if save_cookie:
@@ -139,51 +149,45 @@ def authenticate(browser, username, password, use_cache=False, save_cookie=True)
 	else:
 		print("No username and/or password given, scraping may not be able to work as intended.")
 
-def isXPATHPresent(browser, xpath):
-	return len(browser.find_elements(By.XPATH, xpath)) > 0
-
-def isNotValidUsername(browser, user):
-	page_url = 'https://www.instagram.com/{}/?hl=en'.format(user)
-	browser.get(page_url)
+def is_valid_username(browser, user):
+	browser.get(get_instagram_url(user))
 	time.sleep(5)
-	return isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div/div/div/a')
+	return not is_xpath_present(browser, INVALID_USER)
 
-def getFollowCounts(browser, user):
-	page_url = 'https://www.instagram.com/{}/?hl=en'.format(user)
-	browser.get(page_url)
+def get_follow_counts(browser, user):
+	browser.get(get_instagram_url(user))
 	time.sleep(5)
-	followers = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/header/section/ul/li[2]/a/span').get_attribute('innerHTML')
-	followers = int(followers.replace(',', '').strip())
-	following = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/header/section/ul/li[3]/a/span').get_attribute('innerHTML')
-	following = int(following.replace(',', '').strip())
+	followers = get_element_count(browser, FOLLOWERS_COUNT)
+	following = get_element_count(browser, FOLLOWING_COUNT)
 	return followers, following
 
-def isPrivate(browser, user):
-	page_url = 'https://www.instagram.com/{}/?hl=en'.format(user)
-	browser.get(page_url)
+def is_private(browser, user):
+	browser.get(get_instagram_url(user))
 	time.sleep(5)
-	return isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div/article/div/div/h2')
+	return is_xpath_present(browser, PRIVATE_PROFILE)
 	
 # Scroll to bottom of the browser to pick up dynamically-loaded content
 # Assumes that there isn't an exponential increase in render time
 # A maximum of 32 posts or so can be displayed at a time
 # Added a max post count (if someone has a crazy amount of posts)
 # Returns individual post urls in chronological order (oldest first)
-def getPostUrls(browser, max_posts=100, timeout=2, use_cache=False):
+def get_post_urls(browser, max_posts=100, timeout=2, use_cache=False, cache_location='posts.txt'):
 	if use_cache:
-		if path.exists(POST_CACHE):
-			with open(POST_CACHE) as f:
+		if path.exists(cache_location):
+			with open(cache_location) as f:
 				return f.read().splitlines()
+		else:
+			print("Could not find cache at location:", cache_location)
 	urls = []
-	prev = browser.execute_script("return document.body.scrollHeight")
+	prev = browser.execute_script(JS_GET_SCROLL_HEIGHT)
 	while True:
 		print("Scrolling")
-		browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+		browser.execute_script(JS_SCROLL_TO_BOTTOM)
 		time.sleep(timeout)
-		curr = browser.execute_script("return document.body.scrollHeight")
-		element = browser.find_element_by_xpath("//body").get_attribute('outerHTML')
+		curr = browser.execute_script(JS_GET_SCROLL_HEIGHT)
+		element = browser.find_element_by_xpath(BODY).get_attribute('outerHTML')
 		soup = BeautifulSoup(element, 'html.parser')
-		posts = soup.select('div.v1Nh3.kIKUG._bz0w')
+		posts = soup.select(POST_DIV)
 		for p in posts:
 			link = p.find('a')['href']
 			if link not in urls:
@@ -193,16 +197,12 @@ def getPostUrls(browser, max_posts=100, timeout=2, use_cache=False):
 		if curr == prev:
 			print("Retry")
 			time.sleep(timeout + 2)
-			curr = browser.execute_script("return document.body.scrollHeight")
+			curr = browser.execute_script(JS_GET_SCROLL_HEIGHT)
 			if curr == prev:
 				break
 			timeout += 2
 		prev = curr
 	urls.reverse()
-	with open(POST_CACHE, "w") as f:
-		f.seek(0)
-		f.truncate()
-		f.write("\n".join(urls))
 	return urls
 
 # Returns a list of dictionary items with the following fields:
@@ -212,59 +212,62 @@ def getPostUrls(browser, max_posts=100, timeout=2, use_cache=False):
 #	- likes:		Number of likes on the post
 #	- date:			Date of post (e.g. Jul 30, 2021)
 # List objects are in the same order as their URL was received
-def cleanPosts(browser, urls):
+def clean_posts(browser, urls):
 	cleaned_posts = []
 
 	for url in urls:
-		post_url = 'https://www.instagram.com{}'.format(url)
-		browser.get(post_url)
+		browser.get(get_instagram_url(url))
 		soup = BeautifulSoup(browser.page_source, 'html.parser')
 
 		# Wait until page render
 		# Sometimes may have to trigger a refresh (may be an Instagram rendering issue)
-		while not isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/span'):
+		while not is_xpath_present(browser, CAPTION):
 			time.sleep(1)
 			soup = BeautifulSoup(browser.page_source, 'html.parser')
 
-		caption = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/span').get_attribute('innerHTML')
+		caption = browser.find_element_by_xpath(CAPTION).get_attribute('innerHTML')
 		
 		# Handle images
 		if soup.find('video') is None:
 			post_type = 'image'
 			views = None
-			if isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/span/a'):
+			if is_xpath_present(browser, IMAGE_LIKED_BY_X):
 				# Liked by X and <> others
 				likes = 1
-				if isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/a/span'):
-					likes += int(browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/a/span').get_attribute('innerHTML'))
-			elif isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div/a'):
+				if is_xpath_present(browser, IMAGE_LIKED_BY_X_AND_OTHERS):
+					likes += int(browser.find_element_by_xpath(IMAGE_LIKED_BY_X_AND_OTHERS).get_attribute('innerHTML'))
+			elif is_xpath_present(browser, IMAGE_ONE_LIKE):
 				# 1 like
 				likes = 1
 			else:
 				# Liked by <> others
-				likes = int(browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div/a/span').get_attribute('innerHTML'))
-			date = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/div/div/time').get_attribute('title')
+				likes = int(browser.find_element_by_xpath(IMAGE_LIKED_BY_OTHERS).get_attribute('innerHTML'))
+			date = browser.find_element_by_xpath(IMAGE_DATE).get_attribute('title')
 		# Handle videos
 		else:
 			post_type = 'video'
-			if isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/span/span'):
-				views_element = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/span/span')
+			if is_xpath_present(browser, VIDEO_VIEWS):
+				views_element = browser.find_element_by_xpath(VIDEO_VIEWS)
 				views = int(views_element.get_attribute('innerHTML'))
 				views_element.click()
-				likes = int(browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div/div[4]/span').get_attribute('innerHTML'))
-				date = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[2]/a/time').get_attribute('title')
+				likes = int(browser.find_element_by_xpath(VIDEO_LIKES).get_attribute('innerHTML'))
+				date = browser.find_element_by_xpath(VIDEO_DATE).get_attribute('title')
 			# Some videos are inconsistent and do not display views (structured as images, possibly uploaded as gifs?)
 			else:
 				# No view information for posts of this type
 				views = None
-				caption = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/span').get_attribute('innerHTML')
-				if isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/span/a'):
+				if is_xpath_present(browser, IMAGE_LIKED_BY_X):
+					# Liked by X and <> others
 					likes = 1
-					if isXPATHPresent(browser, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/a/span'):
-						likes += int(browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div[2]/a/span').get_attribute('innerHTML'))
+					if is_xpath_present(browser, IMAGE_LIKED_BY_X_AND_OTHERS):
+						likes += int(browser.find_element_by_xpath(IMAGE_LIKED_BY_X_AND_OTHERS).get_attribute('innerHTML'))
+				elif is_xpath_present(browser, IMAGE_ONE_LIKE):
+					# 1 like
+					likes = 1
 				else:
-					likes = int(browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/section[2]/div/div/a/span').get_attribute('innerHTML'))
-				date = browser.find_element(By.XPATH, '//*[@id="react-root"]/section/main/div/div[1]/article/div[3]/div[1]/ul/div/li/div/div/div[2]/div/div/time').get_attribute('title')
+					# Liked by <> others
+					likes = int(browser.find_element_by_xpath(IMAGE_LIKED_BY_OTHERS).get_attribute('innerHTML'))
+				date = browser.find_element_by_xpath(IMAGE_DATE).get_attribute('title')
 		
 		cleaned = {"post_type": post_type, "caption": caption, "likes": likes, "views": views, "date": date}
 		cleaned_posts.append(cleaned)
