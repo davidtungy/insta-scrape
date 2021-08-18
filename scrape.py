@@ -18,6 +18,8 @@ from selenium.webdriver.common.by import By
 from selenium.common.exceptions import ElementClickInterceptedException
 from webdriver_manager.chrome import ChromeDriverManager
 
+import pandas as pd
+
 DIR_PATH = ''
 
 # TO DO:
@@ -67,7 +69,7 @@ def main(args):
 		browser.quit()
 		return
 
-	urls = get_post_urls(browser, max_posts=500, use_cache=True, cache_location=POST_CACHE)
+	urls = get_post_urls(browser, max_posts=800, use_cache=True, cache_location=POST_CACHE)
 	#urls = getPostUrls(browser, max_posts=500, use_cache=False)
 	with open(POST_CACHE, "w") as f:
 		f.seek(0)
